@@ -171,6 +171,9 @@ int cmd_passwd(int argc, char **argv)
 	bool match;
 	struct pwchange_info info;
 
+	if (config_exists("federated"))
+		die("Cannot change the master password of a federated (SSO) account with lpass; it is managed by your identity provider.");
+
 	/* load existing session, if present */
 	init_all(BLOB_SYNC_YES, key, &session, &blob);
 

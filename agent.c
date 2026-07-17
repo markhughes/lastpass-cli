@@ -90,6 +90,11 @@ bool agent_load_key(unsigned char key[KDF_HASH_LEN])
 	if (iterations <= 0)
 		return false;
 
+	if (config_exists("federated")) {
+		warn("Your session has expired. Federated (SSO) accounts cannot re-derive the key from a master password.\nPlease run `lpass login %s` again.", username);
+		return false;
+	}
+
 	for (;;) {
 		free(password);
 		password = password_prompt("Master Password", password ? "Incorrect master password; please try again." : NULL, "Please enter the LastPass master password for <%s>.", username);

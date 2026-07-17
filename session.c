@@ -114,6 +114,8 @@ void session_kill()
 	config_unlink("session_privatekey");
 	config_unlink("session_server");
 	config_unlink("plaintext_key");
+	config_unlink("federated");
+	config_unlink("federated_flow");
 	
 	feature_flag_cleanup();
 

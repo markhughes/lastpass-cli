@@ -7,7 +7,14 @@
 #include <stddef.h>
 
 unsigned int lastpass_iterations(const char *username);
+struct lastpass_login_extra {
+	const char *alpfragmentid;		/* federated: fragment_id from getkey */
+	const char *calculatedfragmentid;	/* federated: base64(SHA256(k1)) */
+	int ret_iterations;			/* out: server-corrected iteration count, 0 if none */
+};
+
 struct session *lastpass_login(const char *username, const char hash[KDF_HEX_LEN], const unsigned char key[KDF_HASH_LEN], int iterations, char **error_message, bool trust);
+struct session *lastpass_login_ex(const char *username, const char hash[KDF_HEX_LEN], const unsigned char key[KDF_HASH_LEN], int iterations, char **error_message, bool trust, struct lastpass_login_extra *extra);
 void lastpass_logout(const struct session *session);
 struct blob *lastpass_get_blob(const struct session *session, const unsigned char key[KDF_HASH_LEN]);
 unsigned long long lastpass_get_blob_version(struct session *session, unsigned const char key[KDF_HASH_LEN]);
