@@ -21,7 +21,7 @@ DESCRIPTION
 several subcommands:
 
 [verse]
- lpass *login* [--trust] [--plaintext-key [--force, -f]] [--color=auto|never|always] USERNAME
+ lpass *login* [--trust] [--plaintext-key [--force, -f]] [--no-sso] [--color=auto|never|always] USERNAME
  lpass *logout* [--force, -f] [--color=auto|never|always]
  lpass *passwd*
  lpass *show* [--sync=auto|now|no] [--clip, -c] [--quiet, -q] [--expand-multi, -x] [--json, -j] [--all|--username|--password|--url|--notes|--field=FIELD|--id|--name|--attach=ATTACHID] [--basic-regexp, -G|--fixed-strings, -F] [--color=auto|never|always] {NAME|UNIQUEID}*
@@ -119,12 +119,23 @@ subsequent logins to not require multifactor authentication. If the
 hard disk in plaintext.  Please note that use of this option is discouraged
 except in limited situations, as it greatly decreases the security of data.
 
+Federated (SSO) accounts are detected automatically. For these accounts,
+lpass prints an identity provider URL and opens it in a browser (set
+'LPASS_NO_BROWSER' to disable opening a browser automatically); after
+signing in there, copy the final URL from the browser's address bar (an
+accounts.lastpass.com page) and paste it back into the terminal to complete
+the login. Currently only Microsoft Entra ID (Azure AD) is supported as an
+identity provider. When the agent times out, federated accounts must run
+'lpass login' again rather than re-entering a master password. The
+'--no-sso' option skips federated detection and forces the master password
+prompt.
+
 The 'logout' subcommand will remove the local cache and stored encryption
 keys. It will prompt the user to confirm, unless '--force' is specified.
 
 The 'passwd' subcommand may be used to change your LastPass password:
 it will prompt for the old and new password and then re-encrypt all records
-with the newly derived key.
+with the newly derived key. It cannot be used with federated (SSO) accounts.
 
 Viewing
 ~~~~~~~

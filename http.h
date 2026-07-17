@@ -25,4 +25,10 @@ char *http_post_lastpass_param_set(const char *page, const struct session *sessi
 				   struct http_param_set *params);
 char *http_post_lastpass_v_noexit(const char *server, const char *page, const struct session *session, size_t *final_len, char **argv, int *curl_ret, long *http_code);
 
+/* generic HTTPS helpers (standard CA verification, no LastPass cert pinning);
+ * for federated login endpoints only */
+char *http_get_url(const char *url, const char *bearer_token, const char *user_agent, long *http_code);
+char *http_post_url_form(const char *url, char **argv, const char *origin, long *http_code);
+char *http_post_url_json(const char *url, const char *json_body, long *http_code);
+
 #endif

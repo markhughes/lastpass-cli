@@ -258,3 +258,33 @@ char *http_post_lastpass_v_noexit(const char *server, const char *page,
 		*final_len = strlen(response);
 	return response;
 }
+
+/*
+ * Stubs for the generic (non-pinned) HTTP helpers from http.c used by
+ * federated login; unit tests exercise the parsing helpers directly.
+ */
+char *http_get_url(const char *url, const char *bearer_token, const char *user_agent, long *http_code)
+{
+	UNUSED(url);
+	UNUSED(bearer_token);
+	UNUSED(user_agent);
+	*http_code = 0;
+	return NULL;
+}
+
+char *http_post_url_form(const char *url, char **argv, const char *origin, long *http_code)
+{
+	UNUSED(url);
+	UNUSED(argv);
+	UNUSED(origin);
+	*http_code = 0;
+	return NULL;
+}
+
+char *http_post_url_json(const char *url, const char *json_body, long *http_code)
+{
+	UNUSED(url);
+	UNUSED(json_body);
+	*http_code = 0;
+	return NULL;
+}

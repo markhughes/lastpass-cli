@@ -314,7 +314,12 @@ static bool otp_login(const char *login_server, const unsigned char key[KDF_HASH
 
 struct session *lastpass_login(const char *username, const char hash[KDF_HEX_LEN], const unsigned char key[KDF_HASH_LEN], int iterations, char **error_message, bool trust)
 {
-	char *args[33];
+	return lastpass_login_ex(username, hash, key, iterations, error_message, trust, NULL);
+}
+
+struct session *lastpass_login_ex(const char *username, const char hash[KDF_HEX_LEN], const unsigned char key[KDF_HASH_LEN], int iterations, char **error_message, bool trust, struct lastpass_login_extra *extra)
+{
+	char *args[40];
 	_cleanup_free_ char *user_lower = NULL;
 	_cleanup_free_ char *iters = NULL;
 	_cleanup_free_ char *trusted_id = NULL;
@@ -339,9 +344,19 @@ struct session *lastpass_login(const char *username, const char hash[KDF_HEX_LEN
 	append_post(args, "outofbandsupported", "1");
 	if (trusted_id)
 		append_post(args, "uuid", trusted_id);
+	if (extra && extra->alpfragmentid) {
+		append_post(args, "alpfragmentid", extra->alpfragmentid);
+		append_post(args, "calculatedfragmentid", extra->calculatedfragmentid);
+	}
 
 	if (ordinary_login(LASTPASS_SERVER, key, args, &cause, error_message, &reply, &session, &login_server))
 		return session;
+
+	if (extra && reply) {
+		_cleanup_free_ char *ret_iters = xml_error_cause(reply, "iterations");
+		if (ret_iters)
+			extra->ret_iterations = strtoul(ret_iters, NULL, 10);
+	}
 
 	if (trust) {
 		trusted_label = calculate_trust_label();

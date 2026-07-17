@@ -167,6 +167,145 @@ static CURLcode pin_keys(CURL *curl, void *sslctx, void *parm)
 			   verify_callback);
 	return CURLE_OK;
 }
+
+/*
+ * Generic HTTPS request with standard CA verification but without the
+ * LastPass certificate pinning above. Used for federated login endpoints
+ * (identity providers, graph.microsoft.com, accounts.lastpass.com) whose
+ * certificate chains are not in the built-in pin list. Returns the
+ * response body even on HTTP 4xx/5xx (no CURLOPT_FAILONERROR) so callers
+ * can parse OAuth error responses; NULL on transport error.
+ *
+ * Note: request bodies may contain tokens, so they are deliberately not
+ * logged; CURLOPT_VERBOSE at LOG_VERBOSE will still dump headers to the
+ * log file, matching existing behavior for login.php.
+ */
+static char *http_generic_request(const char *url, const char *postdata,
+				  struct curl_slist *headers,
+				  const char *user_agent, long *http_code)
+{
+	_cleanup_fclose_ FILE *logstream = NULL;
+	CURL *curl = NULL;
+	int ret;
+	struct mem_chunk result;
+
+	lpass_log(LOG_DEBUG, "Making generic request to %s\n", url);
+
+	curl = curl_easy_init();
+	if (!curl)
+		die("Could not init curl");
+
+	memset(&result, 0, sizeof(result));
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT,
+			 user_agent ? user_agent : LASTPASS_CLI_USERAGENT);
+	curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
+	if (lpass_log_level() >= LOG_VERBOSE) {
+		logstream = lpass_log_open();
+		if (logstream) {
+			curl_easy_setopt(curl, CURLOPT_STDERR, logstream);
+			curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
+		}
+	}
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
+	curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, check_interruption);
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
+	if (postdata)
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postdata);
+	if (headers)
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+	set_interrupt_detect();
+	ret = curl_easy_perform(curl);
+	unset_interrupt_detect();
+
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+	curl_easy_cleanup(curl);
+
+	if (ret != CURLE_OK) {
+		free(result.ptr);
+		return NULL;
+	}
+	if (!result.ptr)
+		result.ptr = xstrdup("");
+
+	return result.ptr;
+}
+
+char *http_get_url(const char *url, const char *bearer_token,
+		   const char *user_agent, long *http_code)
+{
+	struct curl_slist *headers = NULL;
+	char *result;
+
+	if (bearer_token) {
+		_cleanup_free_ char *auth = NULL;
+		xasprintf(&auth, "Authorization: Bearer %s", bearer_token);
+		headers = curl_slist_append(headers, auth);
+	}
+	result = http_generic_request(url, NULL, headers, user_agent, http_code);
+	curl_slist_free_all(headers);
+	return result;
+}
+
+char *http_post_url_form(const char *url, char **argv, const char *origin, long *http_code)
+{
+	_cleanup_free_ char *postdata = NULL;
+	struct curl_slist *headers = NULL;
+	char *param, *encoded_param;
+	char separator;
+	size_t len, new_len;
+	char *result;
+	CURL *curl;
+
+	curl = curl_easy_init();
+	if (!curl)
+		die("Could not init curl");
+
+	len = 0;
+	for (separator = '=', param = *argv;
+	     param;
+	     separator = (separator == '=') ? '&' : '=', param = *(++argv)) {
+		encoded_param = curl_easy_escape(curl, param, 0);
+		if (!encoded_param)
+			die("Could not escape %s with curl", param);
+		new_len = strlen(encoded_param) + 1 /* separator */;
+		postdata = xrealloc(postdata, len + new_len + 1 /* null */);
+		snprintf(postdata + len, new_len + 1, "%s%c", encoded_param, separator);
+		len += new_len;
+		curl_free(encoded_param);
+	}
+	if (len && postdata)
+		postdata[len - 1] = '\0';
+	curl_easy_cleanup(curl);
+
+	if (origin) {
+		_cleanup_free_ char *origin_header = NULL;
+		xasprintf(&origin_header, "Origin: %s", origin);
+		headers = curl_slist_append(headers, origin_header);
+	}
+
+	result = http_generic_request(url, postdata ? postdata : "", headers, NULL, http_code);
+	curl_slist_free_all(headers);
+	if (postdata)
+		secure_clear(postdata, len);
+	return result;
+}
+
+char *http_post_url_json(const char *url, const char *json_body, long *http_code)
+{
+	struct curl_slist *headers = NULL;
+	char *result;
+
+	headers = curl_slist_append(headers, "Content-Type: application/json");
+	result = http_generic_request(url, json_body, headers, NULL, http_code);
+	curl_slist_free_all(headers);
+	return result;
+}
 #endif
 
 static

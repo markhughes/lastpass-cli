@@ -44,6 +44,7 @@
 #include "config.h"
 #include "agent.h"
 #include "terminal.h"
+#include "federated.h"
 #include <getopt.h>
 
 int cmd_login(int argc, char **argv)
@@ -53,6 +54,7 @@ int cmd_login(int argc, char **argv)
 		{"plaintext-key", no_argument, NULL, 'P'},
 		{"force", no_argument, NULL, 'f'},
 		{"color", required_argument, NULL, 'C'},
+		{"no-sso", no_argument, NULL, 'S'},
 		{0, 0, 0, 0}
 	};
 	int option;
@@ -60,6 +62,9 @@ int cmd_login(int argc, char **argv)
 	bool trust = false;
 	bool plaintext_key = false;
 	bool force = false;
+	bool no_sso = false;
+	bool is_federated = false;
+	struct federated_config fed = { 0 };
 	char *username;
 	_cleanup_free_ char *error = NULL;
 	_cleanup_free_ char *password = NULL;
@@ -83,6 +88,9 @@ int cmd_login(int argc, char **argv)
 			terminal_set_color_mode(
 				parse_color_mode_string(optarg));
 			break;
+		case 'S':
+			no_sso = true;
+			break;
 		case '?':
 		default:
 			die_usage(cmd_login_usage);
@@ -95,11 +103,55 @@ int cmd_login(int argc, char **argv)
 		die("Login aborted. Try again without --plaintext-key.");
 
 	username = argv[optind];
+	is_federated = !no_sso && federated_check(username, &fed);
 	iterations = lastpass_iterations(username);
 	if (!iterations)
 		die("Unable to fetch iteration count. Check your internet connection and be sure your username is valid.");
 
-	do {
+	if (is_federated) {
+		_cleanup_free_ char *fragment_id = NULL;
+		_cleanup_free_ char *calc_fragment_id = NULL;
+
+		federated_login(username, &fed, &password, &fragment_id, &calc_fragment_id);
+
+		/*
+		 * Official clients disagree on calculatedfragmentid: the
+		 * browser extension sends base64(SHA256(k1)), while Bitwarden's
+		 * importer reuses the ALP fragment_id for both fields. Try the
+		 * extension's behavior first, then fall back.
+		 */
+		const char *calc_attempts[] = { calc_fragment_id, fragment_id };
+
+		for (size_t i = 0; i < ARRAY_SIZE(calc_attempts); i++) {
+			struct lastpass_login_extra extra = {
+				.alpfragmentid = fragment_id,
+				.calculatedfragmentid = calc_attempts[i],
+			};
+
+			free(error);
+			error = NULL;
+			kdf_login_key(username, password, iterations, hex);
+			kdf_decryption_key(username, password, iterations, key);
+			session = lastpass_login_ex(username, hex, key, iterations, &error, trust, &extra);
+
+			/* retry once with the server-corrected iteration count */
+			if (!session_is_valid(session) && extra.ret_iterations > 0 &&
+			    extra.ret_iterations != iterations) {
+				iterations = extra.ret_iterations;
+				kdf_login_key(username, password, iterations, hex);
+				kdf_decryption_key(username, password, iterations, key);
+				free(error);
+				error = NULL;
+				session = lastpass_login_ex(username, hex, key, iterations, &error, trust, &extra);
+			}
+
+			if (session_is_valid(session))
+				break;
+		}
+
+		if (!session_is_valid(session))
+			die("Federated login failed: %s", error ? error : "unknown error");
+	} else do {
 		free(password);
 		password = password_prompt("Master Password", error, "Please enter the LastPass master password for <%s>.", username);
 		if (!password)
@@ -112,6 +164,14 @@ int cmd_login(int argc, char **argv)
 		error = NULL;
 		session = lastpass_login(username, hex, key, iterations, &error, trust);
 	} while (!session_is_valid(session));
+
+	federated_config_free_contents(&fed);
+	secure_clear_str(password);
+
+	if (is_federated)
+		config_write_string("federated", "1");
+	else
+		config_unlink("federated");
 
 	config_unlink("plaintext_key");
 	if (plaintext_key)
